@@ -1,0 +1,41 @@
+{
+  "name": "编排者团队",
+  "roles": [
+    {
+      "slug": "orchestrator",
+      "name": "编排者",
+      "revision": 23,
+      "file": "roles/orchestrator.md"
+    },
+    {
+      "slug": "investigator",
+      "name": "调查员",
+      "revision": 5,
+      "file": "roles/investigator.md"
+    },
+    {
+      "slug": "builder",
+      "name": "建造者",
+      "revision": 9,
+      "file": "roles/builder.md"
+    },
+    {
+      "slug": "gate-reviewer",
+      "name": "审查者",
+      "revision": 10,
+      "file": "roles/gate-reviewer.md"
+    },
+    {
+      "slug": "verifier",
+      "name": "放行者",
+      "revision": 14,
+      "file": "roles/verifier.md"
+    },
+    {
+      "slug": "operator",
+      "name": "运维执行者",
+      "revision": 8,
+      "file": "roles/operator.md"
+    }
+  ]
+}
