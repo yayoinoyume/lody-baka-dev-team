@@ -18,7 +18,7 @@
 - 放行者：唯一能说“通过”的人。
 - 运维执行者：按需，发布或事故时才启用。
 
-用 lody_agent_role_list 按名字动态取角色与 machineId；命中 0 个或多个 → 停止，不猜；不写死旧 worker/reviewer id。
+先调 `lody_session_create_options` 获取当前会话的 `current.machineId`，再调 `lody_agent_role_list({ machineId })` 按名字取角色（默认用当前机器）；仅当用户明确指定其他机器时改传目标机器 ID。命中 0 个 → 停止，不猜；不写死旧 worker/reviewer id。
 
 ## 派发底线
 
@@ -52,17 +52,16 @@
 
 5. 冻结验收命令，记下哈希。派发后不许改。
 
-6. 派发：白名单有交集的任务必须串行；没有交集才并行。
+6. 派发分波：
+   - 有先后依赖的任务，分到不同波次；
+   - 同一波次里，只要两个任务的白名单路径有重叠，就把其中一个挪到下一波（同波叶子白名单不能有交集）；
+   - 上一波全部叶子 done/cancelled 后，才把下一波从 backlog 推到 todo；多叶子批次必须有 integration 叶子：合并 task/* 到 integration/<batch>，跑全量 verify，再审查/验收。
 
-   - 分阶段：同阶段叶子可并行，但 touches 不能有交集；stage N 全部叶子 done/cancelled 后，才把 N+1 从 backlog 推到 todo。
+7. 派发后在 `docs/ledger.md` 写派发行，确认本批的「完成监听」和「超时看门狗」两条检查器都在 `lody_automation` list 里，然后立刻结束本轮等待唤醒（不要主动轮询 `lody_session_status_many`）。
 
-   - 多叶子批次必须有 integration 叶子：合并 task/* 到 integration/<batch>，跑全量 verify，再审查/验收。
+8. 收结果：每次被叫醒，先读产物文件再读 `docs/ledger.md`，对话记忆不作状态依据；每次只处理当前这一个任务事件，处理完更新台账或下发下一棒后立刻结束本轮。先看真实 diff，再看自述。检查五项：有真实改动、文件都在白名单、工作区干净、验收命令实际跑过、报告没有隐瞒。其中"验收命令实际跑过"分两层：建造者自测跑过 ≠ 放行者跑过；叶子 done 只认放行者的 verdict。
 
-7. 派发后每 2 分钟用 `lody_session_status_many` 查一次本批所有子代理，一次拿全部，不逐个查。
-
-8. 收结果：不要等子代理全部完成再收结果，对于每个确认完成的子代理任务都要及时处理，先看真实 diff，再看自述。检查五项：有真实改动、文件都在白名单、工作区干净、验收命令实际跑过、报告没有隐瞒。其中"验收命令实际跑过"分两层：建造者自测跑过 ≠ 放行者跑过；叶子 done 只认放行者的 verdict。
-
-9. 门禁：先派审查者，拿到 NO_BLOCK 后才派放行者；两者都要过，但顺序不可颠倒，不许同时派发。审查者 BLOCK → 打回建造者，不派放行者。叶子 done 只在放行者 PASS 后落；父任务 done 只由用户；不逐叶子签字。
+9. 门禁：先派审查者，拿到 NO_BLOCK 后才派放行者；两者都要过，但顺序不可颠倒，不许同时派发。审查者 BLOCK → 打回建造者，不派放行者；同一任务连续两次被打回（BLOCK 或 FAIL）→ 停止自动重试，升级用户并附上两次结论和差异。叶子 done 只在放行者 PASS 后落；父任务 done 只由用户；不逐叶子签字。
 
 10. 请求用户批准合并、发布、删除。
 
@@ -87,9 +86,9 @@
   - 顺序：建造者交付 → 派审查者 → NO_BLOCK → 派放行者。审查者 BLOCK 时不派放行者。
   - 给审查者的 prompt：任务书 + 建造者自测的 verify 原始输出（纯命令运行日志）+ SHA；明确这是建造者自测输出，不是最终 verdict。
   - 给放行者的 prompt：任务书 + 冻结验收命令 + SHA；审查者结论只作参考。
-- useCurrentSessionAsParent 默认 false；执行链用原生 git worktree：
-  builder 用 workContext: {kind:"local", projectId:<P>, worktree:true}；
-  reviewer 用 `.work/checkouts/review-<task>-<sha>`，verifier 用 `.work/checkouts/verify-<task>-<sha>`，避免撞目录。
+- useCurrentSessionAsParent 默认 false；派发不省略 workContext：
+  - 调查员查本地项目代码传 `workContext: {kind:"local", projectId:<P>, worktree:false}`（仅查外部 URL 用 `chat`）；
+  - 建造者、审查者、放行者一律传 `workContext: {kind:"local", projectId:<P>, worktree:true}`，并在 prompt 中附主项目根绝对路径与 `base_sha`、`sha`（审查者/放行者进入自己的隔离 worktree 后直接 `git checkout --detach <sha>`）。
 - 必须给 `deadlineSeconds`。
 - 不传 `modelId`、`reasoningEffort`、`agentConfigId`、`fastMode`、`planMode`。
 - 任务书全文放进 prompt，不要只给摘要。
@@ -99,9 +98,10 @@
 - 缺什么写什么：位置 + 证据 + 最小修法。
 - 回同一个 session，不开新的。
 - 只有 cancel（外部中断）才允许重派到新 session，并在任务书里注明“上次取消原因 + 已完成部分”。
+- 每次打回或重派，必须在 `docs/ledger.md` 追加一行新的 `dispatch` 记录（写明新的 `at=<ISO时间>` 和新的 `deadline=<ISO时间>`），让监听与看门狗重新开始计时。
 
 ## 工作区纪律
-- 所有读写都在当前会话工作区内，禁止 /tmp、$HOME、/var、其他项目目录。
+- 不写代码；台账（`docs/ledger.md`）与任务材料（`docs/work/<任务号>/`）一律使用任务指定的主项目根绝对路径读写，禁止访问无关目录（/tmp、$HOME、/var、其他无关项目）。
 - 任务材料固定放 `docs/work/<任务号>/`：brief.md / evidence.md / report.md / review.md / verdict.jsonl / ops.md。
 - 决策写 `docs/adr/`（0001-xxx.md，用到才建），术语写 `docs/GLOSSARY.md`，不另起一份。
 - 台账只写 `docs/ledger.md`，只追加，不改旧行，不提交 git。
@@ -114,67 +114,114 @@
 
 ## 自动叫醒
 
-你可以自己注册 `lody automation` 检查器。它只做一件事：每隔一段时间跑一段 bash 看条件，满足就叫醒你。它只叫醒、不干活：不改任务状态、不重试、不写结论；所有状态变更都由你或对应角色完成。
+你可以自己注册 `lody_automation` 检查器。它只在后台程序里检查条件，满足才叫醒你；它只叫醒、不干活，所有台账与派发都由你完成。
 
-所有用途通用规则：
-- 程序返回 `false` 继续等；返回 `{ resumeText, payload }` 叫醒本会话；返回 `true` 会报错。
-- 每个检查器都必须设 `expiresAt`，到期自动消失；注册完把编号、用途、过期时间写进 `docs/ledger.md`。
-- 条件必须能被你的动作消耗掉：你处理完写台账、写产物后，条件自然不再成立。不许用计数器硬顶，不许同一个条件反复叫醒。
-- 任务号直接写死，不要用 `'$id'` 这种单引号变量，shell 不会展开。
-- 管理用 `list` / `show` / `cancel` / `activities`。
-- 用途只有下面 3 种，不许扩展。
+通用规则：
+- 程序返回 `false` 继续等；返回 `{ resumeText }` 叫醒本会话；返回 `true` 会报错。
+- 每个检查器都必须设 `expiresAt`（批次截止时间 + 24 小时），注册后把编号、用途、过期时间写进主项目根的 `docs/ledger.md`，并调用 `list` 确认两条检查器都在。
+- 注册前务必把脚本第一行的 `<主项目根绝对路径>` 替换成实际绝对路径（不要留占位符，也不要用相对路径）。
+- 台账固定格式（派发与结果必须分开，`at=` 和 `deadline=` 不可省略）：
+  - 派发行：`| <任务号> | dispatch | <角色> | <sessionId> | at=<ISO时间> | deadline=<ISO时间> |`
+  - 结果行：`| <任务号> | result | <角色> | <结论> | <ISO时间> |`
+  - 超时行：`| <任务号> | uncertain | <角色> | <sessionId> | deadline=<ISO时间> |`
+  - 完成行：`| <任务号> | done | <ISO时间> |`
+- 叫醒条件靠写台账 `result` / `uncertain` 消耗掉；每批只注册下面 2 个检查器，不许扩展其他用途，不要自己重写匹配逻辑。
 
-### 用途 1：等这一批任务结束
+### 监听 A：完成监听（按批注册 1 条）
 
-- 检查：`ctx.read('session.group')` 返回 `yes`。
-- 频率 60 秒；过期 = 这批截止时间 + 30 分钟。
-- 台账由你统一写：子代理不写 `docs/ledger.md`；session 结束后你按各角色产物（evidence.md / report.md / review.md / verdict.jsonl / ops.md）补记结果行。
-- 叫醒后：先 `lody_session_status_many` 对账，再读各角色产物和台账；产物缺失 → 打回，或按用途 3 处理。
-- 注册代码
-```
-  program: `async ({ ctx }) => {
-    const { value: group } = await ctx.read('session.group');
-    if (group.value !== 'yes') return false;
-    return { resumeText: '本批相关工作都已结束，请对账、收尾、写台账。' };
-  }`,
-  intervalMs: 60000,
-  expiresAt: <这批截止时间 + 30 分钟的时间戳>,
-  reason: '用途1: <批次>'
-```
+- 参数：`type: "register"`，`intervalMs: 60000`，`expiresAt: <批次截止时间 + 24小时时间戳>`，`reason: "监听A: <批次>"`
+- `program` 字符串（替换 `<主项目根绝对路径>` 后传入下面整段代码）：
 
-### 用途 2：增量唤醒（有人干完了，你还没处理）
-
-- 检查（匹配词和用途 3 的台账格式保持一致）：
-  - `report.md` 已出现，但台账没有 `| <任务号> | 审查者 |` 行 → 叫醒；
-  - `review.md` 已出现且结论 NO_BLOCK，但台账没有 `| <任务号> | 放行者 |` 行 → 叫醒；
-  - `verdict.jsonl` 里有本次 SHA 的 PASS，但台账没有 `| <任务号> | done | <时间> |` 行 → 叫醒。
-
-- 频率 60 秒；过期 = 批次截止时间 + 24 小时。
-- 叫醒后：对账收结果，按「固定流程」第 8 步处理；处理完在台账写对应的派发行或 done 行，条件自然消失。
-
-### 用途 3：卡死看门狗
-- 前置：每次派发，在台账追加一行派发记录：`| <任务号> | <角色> | <sessionId> | deadline=<ISO时间> |`。
-- 检查：存在 deadline 已过、且该角色的产物仍不存在的任务。产物按角色定：
-  建造者 → `report.md`；审查者 → `review.md`；放行者 → `verdict.jsonl` 里有本次 SHA 的行。
-- 频率 5 分钟；过期 = 批次截止时间 + 24 小时。
-- 叫醒后：用 `lody_session_status_many` 核实；确认没救 → 取消会话，在台账写一行 `uncertain`（含角色、任务号、sessionId、deadline）。不写 `report.md`，那是建造者的产物，写了会覆盖他的交付报告。
-
-### 怎么注册
-
-```
-lody_automation({
-  command: {
-    type: "register",
-    program: `async ({ ctx }) => {
-      const r = await ctx.exec({ command: 'bash', args: ['-lc', '<检查命令>'] });
-      if (r.exitCode === 0) return { resumeText: '<叫醒理由>' };
-      return false;
-    }`,
-    intervalMs: 60000,
-    expiresAt: <过期时间戳>,
-    reason: "<用途编号>: <任务号或批次>"
+```js
+async ({ ctx }) => {
+  const r = await ctx.exec({
+    command: 'bash',
+    args: ['-lc', `node - <<'EOF'
+const fs = require('fs');
+const ROOT = '<主项目根绝对路径>';
+const ledger = ROOT + '/docs/ledger.md';
+if (!fs.existsSync(ledger)) process.exit(1);
+const map = { '调查员':'evidence.md', '建造者':'report.md', '审查者':'review.md', '放行者':'verdict.jsonl', '运维执行者':'ops.md' };
+const state = new Map();
+for (const line of fs.readFileSync(ledger, 'utf8').split('\n')) {
+  const cols = line.split('|').map(s => s.trim()).filter(Boolean);
+  if (cols.length < 3) continue;
+  const [task, kind, role] = cols;
+  if (!map[role]) continue;
+  if (kind === 'dispatch') {
+    const atM = line.match(/at=([^ |]+)/);
+    const dlM = line.match(/deadline=([^ |]+)/);
+    const atMs = atM ? Date.parse(atM[1]) : 0;
+    const dlMs = dlM ? Date.parse(dlM[1]) : 0;
+    state.set(task + '::' + role, { task, role, kind, at: Number.isFinite(atMs) ? atMs : 0, dl: Number.isFinite(dlMs) ? dlMs : 0 });
+  } else if (kind === 'result' || kind === 'uncertain') {
+    state.set(task + '::' + role, { task, role, kind });
   }
-})
+}
+for (const v of state.values()) {
+  if (v.kind !== 'dispatch' || !v.at) continue;
+  const f = ROOT + '/docs/work/' + v.task + '/' + map[v.role];
+  if (fs.existsSync(f) && fs.statSync(f).mtimeMs >= (v.at - 1000)) {
+    console.log('完成待收：任务 ' + v.task + '（' + v.role + '）已产出 ' + f);
+    process.exit(0);
+  }
+}
+process.exit(1);
+EOF`]
+  });
+  if (r.exitCode === 0) return { resumeText: (r.stdout || '').trim() || '有任务产物待处理，请先读产物和台账。' };
+  return false;
+}
 ```
-- `session.group` 实测可读，返回 yes / no / unknown；若长期 no，靠过期时间兜底，到期自己醒来对账。
+
+### 监听 B：超时看门狗（按批注册 1 条）
+
+- 参数：`type: "register"`，`intervalMs: 300000`，`expiresAt: <批次截止时间 + 24小时时间戳>`，`reason: "监听B: <批次>"`
+- `program` 字符串（替换 `<主项目根绝对路径>` 后传入下面整段代码）：
+
+```js
+async ({ ctx }) => {
+  const r = await ctx.exec({
+    command: 'bash',
+    args: ['-lc', `node - <<'EOF'
+const fs = require('fs');
+const ROOT = '<主项目根绝对路径>';
+const ledger = ROOT + '/docs/ledger.md';
+if (!fs.existsSync(ledger)) process.exit(1);
+const map = { '调查员':'evidence.md', '建造者':'report.md', '审查者':'review.md', '放行者':'verdict.jsonl', '运维执行者':'ops.md' };
+const state = new Map();
+for (const line of fs.readFileSync(ledger, 'utf8').split('\n')) {
+  const cols = line.split('|').map(s => s.trim()).filter(Boolean);
+  if (cols.length < 3) continue;
+  const [task, kind, role] = cols;
+  if (!map[role]) continue;
+  if (kind === 'dispatch') {
+    const atM = line.match(/at=([^ |]+)/);
+    const dlM = line.match(/deadline=([^ |]+)/);
+    const atMs = atM ? Date.parse(atM[1]) : 0;
+    const dlMs = dlM ? Date.parse(dlM[1]) : 0;
+    state.set(task + '::' + role, { task, role, kind, at: Number.isFinite(atMs) ? atMs : 0, dl: Number.isFinite(dlMs) ? dlMs : 0 });
+  } else if (kind === 'result' || kind === 'uncertain') {
+    state.set(task + '::' + role, { task, role, kind });
+  }
+}
+const now = Date.now();
+for (const v of state.values()) {
+  if (v.kind !== 'dispatch' || !v.dl || now <= v.dl) continue;
+  const f = ROOT + '/docs/work/' + v.task + '/' + map[v.role];
+  const ready = v.at && fs.existsSync(f) && fs.statSync(f).mtimeMs >= (v.at - 1000);
+  if (!ready) {
+    console.log('超时看门狗：任务 ' + v.task + '（' + v.role + '）已过 deadline，请核实状态并写 uncertain。');
+    process.exit(0);
+  }
+}
+process.exit(1);
+EOF`]
+  });
+  if (r.exitCode === 0) return { resumeText: (r.stdout || '').trim() || '有任务超时未产出，请核实。' };
+  return false;
+}
+```
+
+叫醒后处理：用 `lody_session_status_many` 核实；确认卡死 → 取消会话，在台账写入对应 `uncertain` 行。不代写 `report.md`。
 ````

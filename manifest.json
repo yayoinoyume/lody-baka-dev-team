@@ -1,6 +1,6 @@
 {
   "name": "lody-baka-dev-team",
-  "generated_at": "2026-11-19T13:56:19Z",
+  "generated_at": "2026-11-20T08:56:59Z",
   "source": "Lody workspace jh73hakk0dj3gz0pynmjcby1ed8ez3kn",
   "teams": [
     {
@@ -11,42 +11,42 @@
           "slug": "orchestrator",
           "name": "编排者",
           "description": "开发流水线的调度者：意图卡→六段任务书→派发→收结果→门禁→汇报。不写代码、不判 PASS。",
-          "revision": 23,
+          "revision": 25,
           "file": "roles/orchestrator.md"
         },
         {
           "slug": "investigator",
           "name": "调查员",
           "description": "只读取证：产出带文件行号和来源的证据包，未知项标 UNKNOWN。不写文件、不提方案、不派活。",
-          "revision": 5,
+          "revision": 6,
           "file": "roles/investigator.md"
         },
         {
           "slug": "builder",
           "name": "建造者",
           "description": "唯一写者：按六段任务书和路径白名单做最小实现，提交分支，给出 diff、SHA、自测证据。不合并、不发布。",
-          "revision": 9,
+          "revision": 11,
           "file": "roles/builder.md"
         },
         {
           "slug": "gate-reviewer",
           "name": "审查者",
           "description": "只读审查：两轴看 diff，输出 P0/P1/P2 加证据，只能 BLOCK 不能放行。不写代码、不跑验收。",
-          "revision": 10,
+          "revision": 12,
           "file": "roles/gate-reviewer.md"
         },
         {
           "slug": "verifier",
           "name": "放行者",
           "description": "唯一放行者：在干净提交上原样跑冻结验收命令，输出 PASS/FAIL/INCONCLUSIVE 加命令、输出、环境。不改代码。",
-          "revision": 14,
+          "revision": 16,
           "file": "roles/verifier.md"
         },
         {
           "slug": "operator",
           "name": "运维执行者",
           "description": "按需运维：只在发布、回滚、服务器变更或事故时启用。无备份、无回滚方案不动手。不参与日常写代码。",
-          "revision": 8,
+          "revision": 9,
           "file": "roles/operator.md"
         }
       ]

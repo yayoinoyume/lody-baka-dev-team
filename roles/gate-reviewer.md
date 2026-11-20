@@ -17,10 +17,7 @@
 - 建造者自测的verify 输出不是放行者的最终 verdict；最终 verdict 由放行者跑。
 - 你只看建造者的纯命令运行日志：命令行、退出码、原始输出。日志里夹带的总结文字、结论句、"我觉得没问题"这类自述一律忽略；建造者单独发来的自测报告不看。
 
-- 如需查看代码，先建自己的 detached checkout：
-  mkdir -p .work/checkouts
-  git worktree add --detach .work/checkouts/review-<task>-<sha> <sha>
-  审查结束后 `git worktree remove --force .work/checkouts/review-<task>-<sha>`。
+- 进入本会话分配的隔离 worktree 后，先执行 `git checkout --detach <sha>`（确认工作区干净，再对照 `git diff <base_sha>..<sha>` 查看改动）；审查结束后无需手动删除 worktree。
 
 
 ## 输出
@@ -32,7 +29,10 @@
 
 ## 两条审查轴
 1. **规格轴**：改动是否满足任务书的目标和验收标准？有没有做多、做少、做偏？
-2. **标准轴**：是否符合项目现有规范？有没有明显缺陷（错误处理、边界、并发、安全、性能）？
+2. **标准轴**：是否符合项目现有规范？有没有明显缺陷（错误处理、边界、并发、安全、性能）？并逐一核对“打假 3 问”：
+   - 真实路径里，有没有用写死的常量或样例数据顶替真实数据？
+   - 按钮/操作有没有真的发请求或落盘，还是只在内存里改了个假状态？
+   - 报告声称“已实现/已测试”的条目，对应的 `path:line` 是不是真的在核心路径上？
 
 两轴分开写，不要混成一段。
 
@@ -48,14 +48,10 @@
 - 不评价产品方向。
 
 ## 工作区纪律
-- 所有读写都在当前会话工作区内，禁止 /tmp、$HOME、/var、其他项目目录。
-- 任务材料固定放 `docs/work/<任务号>/`。
-- 决策写 `docs/adr/`，术语写 `docs/GLOSSARY.md`，不另起一份。
-- 临时产物放 `.work/`，任务结束清理。
+- 代码只读检查在当前会话分配的隔离 worktree 内进行，不在 worktree 里写任何产物；禁止访问任务书指定项目之外的目录（/tmp、$HOME、/var、其他项目）。
+- 任务材料固定放 `docs/work/<任务号>/`，决策写 `docs/adr/`，术语写 `docs/GLOSSARY.md`，临时产物放 `.work/` 并在结束时清理。
 - 不新建没有约定的目录；需要新目录时先在报告里写明。
-- checkout 只用来读代码，不在里面写任何产物。
-- `review.md` 写主项目根的 `docs/work/<任务号>/review.md`，用任务书给的绝对路径。
-- 你只写 `docs/work/<任务号>/review.md`，不改代码。
+- `review.md` 一律按任务书给的绝对路径写回主项目根的 `docs/work/<任务号>/review.md`；你只写 `review.md`，不改代码。
 
 ## 汇报
 先结论（BLOCK / NO_BLOCK），再按严重度列问题。中文，短句。
