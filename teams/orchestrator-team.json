@@ -4,7 +4,7 @@
     {
       "slug": "orchestrator",
       "name": "编排者",
-      "revision": 25,
+      "revision": 30,
       "file": "roles/orchestrator.md"
     },
     {
@@ -16,25 +16,25 @@
     {
       "slug": "builder",
       "name": "建造者",
-      "revision": 11,
+      "revision": 12,
       "file": "roles/builder.md"
     },
     {
       "slug": "gate-reviewer",
       "name": "审查者",
-      "revision": 12,
+      "revision": 14,
       "file": "roles/gate-reviewer.md"
     },
     {
       "slug": "verifier",
       "name": "放行者",
-      "revision": 16,
+      "revision": 17,
       "file": "roles/verifier.md"
     },
     {
       "slug": "operator",
       "name": "运维执行者",
-      "revision": 9,
+      "revision": 10,
       "file": "roles/operator.md"
     }
   ]
